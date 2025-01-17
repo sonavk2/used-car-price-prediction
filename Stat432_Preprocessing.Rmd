@@ -1,0 +1,277 @@
+---
+title: "Data Preprocessing"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, message=FALSE, warning=FALSE)
+```
+## Introduction
+
+This section outlines the steps taken to clean and prepare the dataset for analysis, ensuring its readiness for accurate insights and model building. The preprocessing process includes handling missing values to maintain data integrity, transforming unstructured variables into usable formats, encoding categorical data for compatibility with analysis techniques, and standardizing numerical features to ensure consistency across all variables. These steps aim to resolve data quality issues and optimize the dataset for effective exploration and predictive modeling.
+
+## Required Libraries
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(caret)
+```
+
+## Read File
+```{r}
+data = read.csv("used_cars.csv", stringsAsFactors = FALSE)
+```
+
+## Step 1: Handle and Check for Missing Values
+
+```{r}
+#Convert empty strings to NA
+data$fuel_type[data$fuel_type == "" | data$fuel_type == "–"] <- NA
+data$accident[data$accident == ""] <- NA
+data$clean_title[data$clean_title == ""] <- NA
+data$ext_col[data$ext_col == "–"] <- NA
+data$int_col[data$int_col == "–"] <- NA
+
+#Replace NA Values
+data$fuel_type[is.na(data$fuel_type)] <- "not supported"
+data$accident[is.na(data$accident)] <- "None reported"
+data$clean_title[is.na(data$clean_title)] <- "No"
+
+# Impute missing values in ext_color and int_color with mode
+mode_ext_col <- names(sort(table(data$ext_col), decreasing = TRUE))[1]
+mode_int_col <- names(sort(table(data$int_col), decreasing = TRUE))[1]
+
+data$ext_col[is.na(data$ext_col)] <- mode_ext_col
+data$int_col[is.na(data$int_col)] <- mode_int_col
+
+#Check for missing values, confirming the values of each column
+unique(data$fuel_type)
+unique(data$accident)
+unique(data$clean_title)
+sapply(data[c("ext_col", "int_col")], function(x) sum(is.na(x)))
+```
+
+Missing values were represented by empty strings (""), special characters ("–"), or NA. These inconsistencies were unified by treating them as missing data for a consistent approach to cleaning.
+
+* fuel_type:
+  * Missing values were replaced with "not supported" to preserve rows as I noticed that most of the        empty string values were for electric cars, and the not supported values were also for electric         cars.
+  
+* accident: Missing values were replaced with "None reported", indicating no known accidents or damages.
+
+* clean_title: missing values were replaced with "No" to denote that the title is not clean as all other values were yes.
+
+* ext_col and int_col: Missing values were imputed with the most frequent value of each column. This approach minimizes bias and preserves consistency.
+
+These replacements ensured that all rows were retained, preserving the integrity of the dataset while minimizing bias introduced by imputation. To confirm, the unique values of the cleaned columns and counts of remaining missing values were inspected.
+
+## Step 2: Transform Text Variables
+```{r}
+#Convert mileage
+data$milage <- as.numeric(gsub("[^0-9]", "", data$milage))
+
+#Extract horsepower from engine column
+data$horsepower <- as.numeric(gsub(".*?(\\d+\\.\\d+)[Hh][Pp].*", "\\1", data$engine))
+
+#extract enginge displacement from engine column
+data$engine_displacement <- as.numeric(gsub(".*?(\\d+\\.\\d+)[Ll].*", "\\1", data$engine))
+
+#convert price
+data$price <- as.numeric(gsub("[^0-9]", "", data$price))
+
+#Checking NA values
+sapply(data[c("milage", "horsepower", "engine_displacement", "price")], function(x) sum(is.na(x)))
+```
+Several columns contained unstructured text data, which were cleaned and converted into usable formats.
+
+* Mileage: Non-numeric characters (e.g., "mi") were removed using regular expressions, and the column was converted to numeric for further analysis.
+
+* Horsepower and Engine Displacement were extracted from unstructured text in the engine column using regular expressions, creating two new numeric columns.
+
+* Price: Similar cleaning was applied to the price column, removing non-numeric characters like commas or currency symbols.
+
+
+```{r}
+# Predict horsepower using linear regression
+horsepower_model <- lm(horsepower ~ model_year + fuel_type + milage, data = data, na.action = na.exclude)
+
+data$horsepower[is.na(data$horsepower)] <- predict(horsepower_model, newdata = data[is.na(data$horsepower), ])
+
+# Predict engine displacement using linear regression
+engine_disp_model <- lm(engine_displacement ~ model_year + fuel_type + milage, data = data, na.action = na.exclude)
+
+data$engine_displacement[is.na(data$engine_displacement)] <- predict(engine_disp_model, newdata = data[is.na(data$engine_displacement), ])
+
+# Confirming missing values
+sapply(data[c("horsepower", "engine_displacement")], function(x) sum(is.na(x)))
+```
+
+After extracting the horsepower and enginge displacement from the engine column a large number of NA values were introduced. However, these 2 variables are critical in understanding the car's performance and price. Having missing values for these features could significantly impact clustering and regression results. To address this, we used regression modeling for imputation because:
+  * Horsepower and engine_displacement are tied to features like model_year, fuel_type and mileage
+  * Using imputation by regression models can leverage these relationships to generate contextually         meaningful estimates
+  * By using this approach, we retain all the rows and avoid potential biases that could be introduced        by dropping rows.
+  
+Steps:
+1. We built a linear regression model horsepower as the dependent variable and model_year, fuel_type, and mileage as predictors. We used a similar approach for engine_displacement using the same predictors. The dataset was then rechecked to ensure that there were no longer any missing values.
+
+## Step 3: Handling Categorical Variables
+
+```{r}
+group_colors <- function(color) {
+  if (grepl("Black|Ebony|Jet|Midnight|Obsidian|Sapphire|Carbon Black", color, ignore.case = TRUE)) {
+    return("Black")
+  } else if (grepl("White|Pearl|Glacier|Ivory|Platinum|Diamond", color, ignore.case = TRUE)) {
+    return("White")
+  } else if (grepl("Gray|Silver|Gunmetal|Graphite|Slate|Selenite", color, ignore.case = TRUE)) {
+    return("Gray")
+  } else if (grepl("Blue|Navy|Aqua|Cobalt|Azure|Caelum", color, ignore.case = TRUE)) {
+    return("Blue")
+  } else if (grepl("Red|Cherry|Burgundy|Ruby|Crimson|Scarlet", color, ignore.case = TRUE)) {
+    return("Red")
+  } else if (grepl("Beige|Tan|Cream|Cobra Beige|Sandstone", color, ignore.case = TRUE)) {
+    return("Beige")
+  } else if (grepl("Brown|Bronze|Cocoa|Mahogany|Kodiak", color, ignore.case = TRUE)) {
+    return("Brown")
+  } else {
+    return("Rare")
+  }
+}
+
+group_int_colors <- function(color) {
+  if (grepl("Black|Ebony|Jet|Carbon|Graphite", color, ignore.case = TRUE)) {
+    return("Black")
+  } else if (grepl("Gray|Slate|Silver|Ash|Stone", color, ignore.case = TRUE)) {
+    return("Gray")
+  } else if (grepl("Beige|Cream|Tan|Macchiato|Parchment|Camel", color, ignore.case = TRUE)) {
+    return("Beige")
+  } else if (grepl("Brown|Cocoa|Chestnut|Saddle|Nougat", color, ignore.case = TRUE)) {
+    return("Brown")
+  } else if (grepl("White|Ivory|Platinum|Porpoise|Linen", color, ignore.case = TRUE)) {
+    return("White")
+  } else if (grepl("Red|Pimento|Adrenaline|Rioja|Hotspur", color, ignore.case = TRUE)) {
+    return("Red")
+  } else {
+    return("Rare")
+  }
+}
+
+data$ext_color_grouped <- sapply(data$ext_col, group_colors)
+
+table(data$ext_color_grouped)
+
+data$int_color_grouped <- sapply(data$int_col, group_int_colors)
+
+table(data$int_color_grouped)
+```
+
+Exterior and interior car colors were grouped into broader, standardized categories to simplify analysis and reduce variability in the dataset. The grouping process involved categorizing colors into eight main categories: Black, White, Gray, Blue, Red, Beige, Brown, and Rare. This was achieved using the grepl function, which performs pattern matching to identify colors associated with each category based on descriptive text.
+
+By grouping colors into these broader categories, the dataset becomes more manageable for statistical modeling and visualization. It reduces the dimensionality of the data, avoids overfitting caused by overly specific categories, and enhances interpretability for both clustering and predictive models. Additionally, grouping by broader categories aligns with real-world insights, where subtle variations in shades (e.g., "Carbon Black" vs. "Jet Black") are unlikely to drastically influence customer perceptions or market trends beyond the broader category.
+
+```{r}
+group_transmission <- function(trans) {
+  if (grepl("Automatic|A/T|CVT|Auto", trans, ignore.case = TRUE)) {
+    if (grepl("Dual-Clutch|DCT", trans, ignore.case = TRUE)) {
+      return("Dual-Clutch")
+    } else if (grepl("Single-Speed|1-Speed", trans, ignore.case = TRUE)) {
+      return("Single-Speed")
+    } else {
+      return("Automatic")
+    }
+  } else if (grepl("Manual|M/T", trans, ignore.case = TRUE)) {
+    return("Manual")
+  } else {
+    return("Other")
+  }
+}
+
+data$transmission_grouped <- sapply(data$transmission, group_transmission)
+
+table(data$transmission_grouped)
+```
+Types were categorized into "Automatic", "Dual-Clutch", "Manual", "Single-Speed", and "Other", simplifying the analysis by consolidating similar types.
+
+```{r}
+# Perform one-hot encoding 
+data_one_hot <- model.matrix(~ fuel_type + transmission_grouped + ext_color_grouped + int_color_grouped - 1, data = data)
+
+# Combine the one-hot encoded data with the original dataset
+data <- cbind(data, data_one_hot)
+
+# Binary encode clean_title and accident
+data$clean_title <- ifelse(data$clean_title == "Yes", 1, 0)
+data$accident <- ifelse(data$accident == "At least 1 accident or damage reported", 1, 0)
+
+# Drop redundant columns 
+columns_to_drop <- c("fuel_type", "transmission_grouped", "ext_color_grouped", "int_color_grouped", 
+                     "transmission", "ext_col", "int_col")
+data <- data[, !(names(data) %in% columns_to_drop)]
+```
+
+Categorical variables (fuel_type, transmission_grouped, ext_color_grouped, int_color_grouped) were one-hot encoded using model.matrix. Binary variables (clean_title, accident) were encoded as 1 (Yes/Reported) and 0 (No/None reported). We decided to use one hot encoding as it transforms categorical data into a format compatible with clustering and regression models.
+
+## Step 4: Standarize Variables
+
+```{r}
+# Create a copy of the original dataset
+scaled_data <- data
+
+# Define the numerical columns to scale
+numerical_cols <- c("milage", "engine_displacement", "horsepower", "price")
+
+# Standardize the numerical variables in the scaled_data copy
+scaled_data[numerical_cols] <- scale(scaled_data[numerical_cols])
+
+# Check mean and standard deviation of scaled variables
+sapply(scaled_data[numerical_cols], function(x) c(mean = mean(x), sd = sd(x)))
+
+# Save the scaled dataset to a CSV file
+write.csv(scaled_data, "scaled_used_cars.csv", row.names = FALSE)
+
+# Optionally, save the original dataset as well for reference
+write.csv(data, "original_used_cars.csv", row.names = FALSE)
+
+```
+
+Lastly, we standardized numerical variables (mileage, engine_displacement, horsepower, price) using the scale function. Columns like mileage, engine_displacement, horsepower, and price were standardized using the scale() function to have a mean of 0 and standard deviation of 1. Standardization ensures that features are on the same scale, preventing any single feature from dominating the model due to its magnitude.
+
+## Step 5: Summary of final dataset
+
+```{r}
+# Summary statistics for numerical variables
+summary(data[c("milage", "engine_displacement", "horsepower", "price")])
+
+# Frequency table for categorical variables
+table(data$clean_title)
+table(data$accident)
+table(data_one_hot)
+
+# Frequency table for categorical variables
+table(data$clean_title)
+table(data$accident)
+table(data_one_hot)  # Example for one-hot encoded variables
+
+# Histogram for mileage (original values)
+ggplot(data, aes(x = milage)) +
+  geom_histogram(bins = 30, fill = "blue", alpha = 0.7) +
+  labs(title = "Distribution of Original Mileage", x = "Mileage (Original)", y = "Frequency") +
+  theme_minimal()
+
+# Histogram for price (original values)
+ggplot(data, aes(x = price)) +
+  geom_histogram(bins = 30, fill = "green", alpha = 0.7) +
+  labs(title = "Distribution of Price (Without Outliers)", 
+       x = "Price (Original)", 
+       y = "Frequency") +
+  xlim(0, 500000) +  # Adjust limit based on the bulk of your data
+  theme_minimal()
+```
+
+We performed a detailed exploration of the dataset by generating summary statistics and visualizations for both numerical and categorical variables. For numerical variables such as mileage, engine displacement, horsepower, and price, we computed summary statistics to understand their distributions, including measures like minimum, maximum, median, and mean. For categorical variables like clean title and accident history, we created frequency tables to examine the prevalence of each category. Additionally, we visualized the distributions of mileage and price using histograms. To address the skewness in price data, we adjusted the x-axis to exclude outliers, focusing on the bulk of the data. These steps provide a comprehensive understanding of the dataset's structure and characteristics, preparing it for further analysis.
+
+
+

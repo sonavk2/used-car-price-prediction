@@ -1,0 +1,145 @@
+---
+title: "Unsupervised Learning"
+output: pdf_document
+date: "2024-12-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, message=FALSE, warning=FALSE)
+```
+
+## Unsupervised Learning
+
+```{r}
+scaled_data = read.csv("scaled_used_cars.csv", stringsAsFactors = FALSE)
+```
+
+### K-means clustering
+```{r}
+# load necessary libraries
+library(factoextra)
+library(cluster)
+library(ggplot2)
+library(dplyr)
+library(kernlab)
+
+# select only numeric data for clustering
+clustering_data <- scaled_data %>%
+  select(where(is.numeric))
+set.seed(123)  # For reproducibility
+
+# Elbow Method
+fviz_nbclust(clustering_data, kmeans, method = "wss") +
+  labs(title = "Elbow Method for Optimal K")
+
+# Silhouette Method
+fviz_nbclust(clustering_data, kmeans, method = "silhouette") +
+  labs(title = "Silhouette Method for Optimal K")
+
+kmeans_model <- kmeans(clustering_data, centers = 2, nstart = 25)
+
+# Add cluster assignments to the original dataset
+scaled_data$cluster <- as.factor(kmeans_model$cluster)
+
+# Visualize clusters using PCA
+fviz_cluster(kmeans_model, data = clustering_data,
+             geom = "point",
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal(),
+             main = "K-Means Clustering with K=2")
+
+#Clustering summary
+clustering_summary <- scaled_data %>%
+  group_by(cluster) %>%
+  summarise(across(where(is.numeric), mean))
+print(clustering_summary)
+
+# Association with price
+ggplot(scaled_data, aes(x = cluster, y = price, fill = cluster)) +
+  geom_boxplot() +
+  labs(title = "Price Distribution Across Clusters", x = "Cluster", y = "Price")
+```
+
+The analysis determined that the optimal number of clusters for the dataset is 2, as indicated by the Elbow and Silhouette methods. The Elbow Method revealed a significant drop in the total within-cluster sum of squares (WSS) at k=2, followed by diminishing returns, while the Silhouette Method showed the highest average silhouette width at k=2, suggesting well-separated and cohesive clusters. The visualization using PCA highlighted two distinct groups although with heavy overlap.
+
+According to the clustering summary, cluster 1 represents newer, low-mileage, higher-priced cars with better performance and clean titles, while Cluster 2 includes older, higher-mileage cars with lower prices and performance. The price distribution aligns with these attributes, with Cluster 1 having higher average prices and Cluster 2 showing lower ones. Outliers in Cluster 2 may include rare, antique cars with high value despite their age, while lower-priced outliers in Cluster 1 could reflect damaged or less desirable newer cars. 
+
+### Hierarchical Clustering
+```{r}
+distance_matrix <- dist(clustering_data, method = "euclidean")
+
+# Perform hierarchical clustering using Ward's method
+hclust_model <- hclust(distance_matrix, method = "ward.D2")
+
+# Plot the dendrogram
+plot(hclust_model, labels = FALSE, main = "Hierarchical Clustering Dendrogram", sub = "", xlab = "")
+
+# Cut the tree to form clusters (choose 2 clusters based on analysis)
+clusters <- cutree(hclust_model, k = 2)
+
+# Add cluster assignments to the original dataset
+scaled_data$cluster_hierarchical <- as.factor(clusters)
+
+# Visualize clusters using PCA
+fviz_cluster(list(data = clustering_data, cluster = clusters),
+             geom = "point",
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal(),
+             main = "Hierarchical Clustering with K=2")
+
+# Summarize clusters
+cluster_summary <- scaled_data %>%
+  group_by(cluster_hierarchical) %>%
+  summarise(across(where(is.numeric), mean))
+print(cluster_summary)
+
+# Check association with outcome variable (e.g., price)
+ggplot(scaled_data, aes(x = cluster_hierarchical, y = price, fill = cluster_hierarchical)) +
+  geom_boxplot() +
+  labs(title = "Price Distribution Across Hierarchical Clusters", x = "Cluster", y = "Price")
+```
+Based on the cluster summary, cluster 1 represents older, high-mileage cars with lower prices, and cluster 2 consists of newer, low-mileage cars with higher prices. These results are the same as the K-means clustering results. The clustering results strongly correlate with price, as evidenced by the distinct separation in price distributions between the two clusters. The lower prices in Cluster 1 and higher prices in Cluster 2 align with the attributes of each cluster, such as mileage, model year, and accident history.
+
+### Spectral Clustering
+```{r}
+# Perform spectral clustering with 2 clusters (based on prior analysis)
+spectral_model <- specc(as.matrix(clustering_data), centers = 2, kernel = "rbfdot")
+
+# Add cluster assignments to the original dataset
+scaled_data$cluster_spectral <- as.factor(spectral_model@.Data)
+
+# Visualize clusters using PCA
+fviz_cluster(list(data = clustering_data, cluster = spectral_model@.Data),
+             geom = "point",
+             ellipse.type = "convex",
+             palette = "jco",
+             ggtheme = theme_minimal(),
+             main = "Spectral Clustering with K=2")
+
+# Summarize clusters
+cluster_summary <- scaled_data %>%
+  group_by(cluster_spectral) %>%
+  summarise(across(where(is.numeric), mean))
+print(cluster_summary)
+
+# Analyze association with price
+ggplot(scaled_data, aes(x = cluster_spectral, y = price, fill = cluster_spectral)) +
+  geom_boxplot() +
+  labs(title = "Price Distribution Across Spectral Clusters", x = "Cluster", y = "Price")
+```
+Cluster 1 represents newer, average-market cars, with balanced attributes across price, mileage, and performance, while cluster 2 includes older, rare, and high-performance vehicles.
+
+### How Clustering Results Can Be Useful for Supervised Learning
+* Feature Engineering:
+  - Cluster membership from each method can be added as a categorical feature in a supervised learning model to improve predictions of the price.
+  - These features encapsulate relationships among attributes like model year, mileage, and performance, providing a compact representation of vehicle characteristics.
+
+* Segmented Modeling:
+  - Use clusters to build separate models for each group, tailoring predictions to their unique patterns (e.g., separate pricing models for regular cars vs. antique/collector cars).
+  
+* Outlier Detection:
+  - Spectral clustering, in particular, highlights rare, high-value vehicles that could skew predictions. Identifying these outliers allows for better handling in regression models.
+  Explaining Variability:
+
